@@ -1,4 +1,5 @@
 import json
+import random
 from pathlib import Path
 
 from pyspark.ml.clustering import KMeans, KMeansModel
@@ -7,6 +8,7 @@ from pyspark.ml.feature import StandardScaler, StandardScalerModel, VectorAssemb
 
 from logger import get_logger
 from spark_session import create_spark, plan_resources
+from datasource import MsSqlDataSource
 from utils import load_config
 
 logger = get_logger(__name__)
@@ -85,11 +87,18 @@ class ModelKMEANS:
 
     def train(self):
         """Train KMeans model."""
-        try:
-            resources = plan_resources(self.config.spark)
-            spark = create_spark(self.config.spark, resources)
+        ds = MsSqlDataSource()
+        resources = plan_resources(self.config.spark)
+        spark = create_spark(self.config.spark, resources)
 
-            sample_path = self.config.data.sample_path
+        params = {
+            "k_min": self.config.model.k_min,
+            "k_max": self.config.model.k_max,
+            "features": self.config.features.numeric,
+        }
+        run_id = ds.start_run("train", self.config.model.scaler_path, params)
+        logger.info("Запуск обучения зарегистрирован: run_id=%d", run_id)
+        try:
             numeric_features = self.config.features.numeric
             vec_assembler = VectorAssembler(
                 inputCols=numeric_features, outputCol="features"
@@ -100,7 +109,11 @@ class ModelKMEANS:
                 withStd=True,
                 withMean=False,
             )
-            df = spark.read.parquet(sample_path)
+            df = ds.fetch_training_data(spark)
+            if df.isEmpty():
+                raise ValueError(
+                    "raw.processed_data пуста — сначала запустите `python src/main.py preprocess`"
+                )
 
             final_data = vec_assembler.transform(df)
             final_data.select("features").show(5)
@@ -111,35 +124,80 @@ class ModelKMEANS:
 
             best_k, best_score, best_model, scores = self.get_best_model(final_data)
             predictions = best_model.transform(final_data)
-            self.save_results(
-                best_k, best_score, best_model, scalerModel, predictions, scores
+
+            model_path = f"{self.config.model.model_path}/run_{run_id}"
+            scaler_path = f"{self.config.model.scaler_path}/run_{run_id}"
+            best_model.write().overwrite().save(model_path)
+            scalerModel.write().overwrite().save(scaler_path)
+            logger.info("Модель сохранена в %s, скейлер в %s", model_path, scaler_path)
+
+            ds.save_predictions(predictions, run_id)
+            ds.finish_run(
+                run_id,
+                "SUCCESS",
+                rows_in=df.count(),
+                best_k=best_k,
+                best_silhouette=best_score,
+                params=params | {"silhouette_by_k": scores, "model_path": model_path},
+                scaler_path=scaler_path,
             )
+            logger.info(
+                "Запуск %d завершён: best_k=%d, silhouette=%.4f",
+                run_id,
+                best_k,
+                best_score,
+            )
+        except Exception as exc:
+            logger.exception("Запуск %d упал", run_id)
+            ds.finish_run(run_id, "FAILED", error_message=repr(exc))
+            raise
         finally:
             spark.stop()
 
-    def predict(self, predictions_path, df=None):
-        """Применяет уже обученную модель, сохраняет предсказания и останавливает сессию."""
-        try:
-            resources = plan_resources(self.config.spark)
-            spark = create_spark(self.config.spark, resources)
+    def predict(self, predictions_path, train_run_id=None, df=None):
+        """Применяет модель запуска обучения (по умолчанию последнего успешного) к данным из БД."""
+        ds = MsSqlDataSource()
+        train_run = ds.get_train_run(train_run_id)
+        logger.info("Использую модель запуска обучения run_id=%d", train_run["run_id"])
 
+        resources = plan_resources(self.config.spark)
+        spark = create_spark(self.config.spark, resources)
+
+        params = {"train_run_id": train_run["run_id"], "model_path": train_run["model_path"]}
+        run_id = ds.start_run("predict", train_run["scaler_path"], params)
+        logger.info("Запуск предсказания зарегистрирован: run_id=%d", run_id)
+        try:
             if df is None:
-                df = spark.read.parquet(self.config.data.sample_path)
+                df = ds.fetch_training_data(spark)
+            if df.isEmpty():
+                raise ValueError(
+                    "Нет данных для предсказания — сначала запустите `python src/main.py preprocess`"
+                )
 
             vec_assembler = VectorAssembler(
                 inputCols=self.config.features.numeric, outputCol="features"
             )
-            scaler_model = StandardScalerModel.load(self.config.model.scaler_path)
-            kmeans_model = KMeansModel.load(self.config.model.model_path)
+            scaler_model = StandardScalerModel.load(train_run["scaler_path"])
+            kmeans_model = KMeansModel.load(train_run["model_path"])
 
             features_df = vec_assembler.transform(df)
             scaled_df = scaler_model.transform(features_df)
             predictions = kmeans_model.transform(scaled_df)
 
-            result = predictions.select(*self.config.features.meta, "prediction")
+            ds.save_predictions(predictions, run_id)
+            ds.finish_run(
+                run_id, "SUCCESS", rows_in=df.count(), best_k=kmeans_model.getK()
+            )
+
+            result = ds.fetch_predictions(spark, run_id)
+            result.groupBy("cluster_id").count().orderBy("cluster_id").show()
             result.show(5)
 
             result.write.mode("overwrite").parquet(predictions_path)
-            logger.info("Предсказания сохранены в %s", predictions_path)
+            logger.info("Запуск %d завершён, предсказания выгружены в %s", run_id, predictions_path)
+        except Exception as exc:
+            logger.exception("Запуск %d упал", run_id)
+            ds.finish_run(run_id, "FAILED", error_message=repr(exc))
+            raise
         finally:
             spark.stop()

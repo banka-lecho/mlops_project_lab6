@@ -53,6 +53,17 @@ class ModelConfig:
 
 
 @dataclass(frozen=True)
+class DBConfig:
+    host: str
+    port: str
+    database: str
+    raw_schema: str
+    ml_schema: str
+    num_partitions: int
+    tables: list[str]
+
+
+@dataclass(frozen=True)
 class Config:
     spark: SparkConfig
     data: DataConfig
@@ -60,6 +71,7 @@ class Config:
     cleaning: CleaningConfig
     sampling: SamplingConfig
     model: ModelConfig
+    database: DBConfig
 
 
 def load_config(config_path: str | None = None) -> Config:
@@ -80,4 +92,5 @@ def load_config(config_path: str | None = None) -> Config:
         cleaning=CleaningConfig(**data["cleaning"]),
         sampling=SamplingConfig(**data["sampling"]),
         model=ModelConfig(**data["model"]),
+        database=DBConfig(**data["datasource"])
     )

@@ -9,7 +9,7 @@ htmlcov/
 logs/
 
 # venv
-.lab5_venv
+.lab6_venv
 .DS_Store
 
 # data (сырой CSV ~13 ГБ и производные parquet)
@@ -19,3 +19,7 @@ data/
 spark-warehouse/
 metastore_db/
 derby.log
+
+# reports and models
+reports/preprocess_report/
+models
