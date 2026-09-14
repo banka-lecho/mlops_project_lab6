@@ -81,7 +81,6 @@ class PreProcessor:
             return df.filter(macro_sum <= 100)
 
         return [
-            # code — ключ товара в ml.predictions, поэтому он обязан быть и быть уникальным
             (
                 "duplicates",
                 lambda df: df.filter(F.col("code").isNotNull() & (F.length("code") <= 64))
@@ -171,7 +170,7 @@ class PreProcessor:
         df = spark.read.parquet(interim_path)
 
         steps = self.cleaning_steps(numeric_features)
-        cleaned, stats = self.clean(df, steps)  # чистим
+        cleaned, stats = self.clean(df, steps) 
         for row in stats:
             logger.info("%s: %d строк", row["step"], row["rows"])
 

@@ -23,8 +23,8 @@ class MsSqlDataSource:
     def __init__(self):
         self.config = load_config()
         db_config = self.config.database
-        self.host = db_config.host
-        self.port = db_config.port
+        self.host = os.environ.get("MSSQL_HOST", db_config.host)
+        self.port = os.environ.get("MSSQL_PORT", db_config.port)
         self.raw_schema = db_config.raw_schema
         self.ml_schema = db_config.ml_schema
         self.db_name = db_config.database
@@ -32,7 +32,7 @@ class MsSqlDataSource:
 
     def _connection_opts(self) -> dict:
         return {
-            "url": f"jdbc:sqlserver://localhost:{self.port};databaseName={self.db_name}"
+            "url": f"jdbc:sqlserver://{self.host}:{self.port};databaseName={self.db_name}"
             ";encrypt=true;trustServerCertificate=true",
             "driver": "com.microsoft.sqlserver.jdbc.SQLServerDriver",
             "user": os.environ["MSSQL_USER"],

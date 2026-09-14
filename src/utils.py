@@ -9,7 +9,7 @@ class SparkConfig:
     ram_fraction: float
     driver_memory_min_gb: int
     driver_memory_max_gb: int
-    cores: int  # 0 = все ядра машины
+    cores: int
     shuffle_partitions_per_core: int
     log_level: str
 
@@ -92,5 +92,5 @@ def load_config(config_path: str | None = None) -> Config:
         cleaning=CleaningConfig(**data["cleaning"]),
         sampling=SamplingConfig(**data["sampling"]),
         model=ModelConfig(**data["model"]),
-        database=DBConfig(**data["datasource"])
+        database=DBConfig(**data["datasource"]),
     )

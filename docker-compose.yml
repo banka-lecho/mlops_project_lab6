@@ -1,0 +1,60 @@
+services:
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: mssql-lab6
+    platform: linux/amd64
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?задайте MSSQL_SA_PASSWORD в .env}
+      MSSQL_PID: Developer
+    ports:
+      - "1433:1433"
+    volumes:
+      - mssql-data:/var/opt/mssql
+      - ./docker/mssql/init:/schema:ro
+    healthcheck:
+      test: [
+        "CMD-SHELL",
+        "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$${MSSQL_SA_PASSWORD}\" -C -Q \"SELECT 1\" || exit 1"
+      ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  mssql-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    depends_on:
+      mssql:
+        condition: service_healthy
+    environment:
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?задайте MSSQL_SA_PASSWORD в .env}
+    volumes:
+      - ./docker/mssql/init:/schema:ro
+    entrypoint: ["/bin/bash", "-c"]
+    command: ['/opt/mssql-tools18/bin/sqlcmd -S mssql -U sa -P "$$MSSQL_SA_PASSWORD" -C -b -i /schema/schema.sql']
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mlops-lab6
+    container_name: openfoodfacts-kmeans-app
+    environment:
+      MSSQL_HOST: mssql
+      MSSQL_USER: ${MSSQL_USER:?задайте MSSQL_USER в .env}
+      MSSQL_PASSWORD: ${MSSQL_PASSWORD:?задайте MSSQL_PASSWORD в .env}
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./reports:/app/reports
+    depends_on:
+      mssql-init:
+        condition: service_completed_successfully
+    command: ["preprocess"]
+
+volumes:
+  mssql-data:

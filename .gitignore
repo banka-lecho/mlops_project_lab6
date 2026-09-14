@@ -12,6 +12,9 @@ logs/
 .lab6_venv
 .DS_Store
 
+# секреты (шаблон — .env.example)
+.env
+
 # data (сырой CSV ~13 ГБ и производные parquet)
 data/
 

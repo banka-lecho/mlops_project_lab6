@@ -1,0 +1,15 @@
+.git
+.lab6_venv
+.env
+data
+models
+reports
+logs
+docker
+**/__pycache__
+*.py[cod]
+.pytest_cache
+spark-warehouse
+metastore_db
+*.log
+.DS_Store
